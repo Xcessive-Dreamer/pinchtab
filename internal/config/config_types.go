@@ -61,6 +61,11 @@ type RuntimeConfig struct {
 	AttachAllowHosts   []string
 	AttachAllowSchemes []string
 
+	// External CDP connection (bridge mode only).
+	// When set, the bridge connects to an already-running Chrome/Chromium
+	// instance via this WebSocket URL instead of launching its own.
+	CdpURL string
+
 	// IDPI (Indirect Prompt Injection defense) settings
 	IDPI IDPIConfig
 

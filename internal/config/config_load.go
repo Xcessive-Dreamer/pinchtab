@@ -80,6 +80,9 @@ func Load() *RuntimeConfig {
 
 		// Engine default
 		Engine: envOr("PINCHTAB_ENGINE", "chrome"),
+
+		// External CDP URL (bridge mode only)
+		CdpURL: os.Getenv("PINCHTAB_CDP_URL"),
 	}
 	finalizeProfileConfig(cfg)
 

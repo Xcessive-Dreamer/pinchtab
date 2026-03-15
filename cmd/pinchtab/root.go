@@ -65,6 +65,12 @@ browsers, manage tabs, and perform interactive tasks.`,
 			return
 		}
 
+		// When PINCHTAB_CDP_URL is set, auto-select bridge mode
+		if cfg.CdpURL != "" {
+			server.RunBridgeServer(cfg)
+			return
+		}
+
 		// Fallback for non-interactive: start the server
 		server.RunDashboard(cfg, version)
 	},

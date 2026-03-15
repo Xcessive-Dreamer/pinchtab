@@ -20,18 +20,30 @@ import (
 
 func RunBridgeServer(cfg *config.RuntimeConfig) {
 	listenAddr := cfg.ListenAddr()
+	mode := "bridge"
+	if cfg.CdpURL != "" {
+		mode = "bridge (cdp-attach)"
+	}
 	cli.PrintStartupBanner(cfg, cli.StartupBannerOptions{
-		Mode:         "bridge",
+		Mode:         mode,
 		ListenAddr:   listenAddr,
 		ListenStatus: "starting",
 		ProfileDir:   cfg.ProfileDir,
 	})
+	if cfg.CdpURL != "" {
+		slog.Info("CDP attach mode", "cdpUrl", cfg.CdpURL)
+	}
 
 	// Clean up orphaned Chrome processes from previous crashed runs
-	bridge.CleanupOrphanedChromeProcesses(cfg.ProfileDir)
+	// (skip when attaching to external Chrome — we don't own those processes)
+	if cfg.CdpURL == "" {
+		bridge.CleanupOrphanedChromeProcesses(cfg.ProfileDir)
+	}
 
 	bridgeInstance := bridge.New(context.Background(), nil, cfg)
-	bridgeInstance.StealthScript = assets.StealthScript
+	if cfg.CdpURL == "" {
+		bridgeInstance.StealthScript = assets.StealthScript
+	}
 
 	mux := http.NewServeMux()
 	h := handlers.New(bridgeInstance, cfg, nil, nil, nil)

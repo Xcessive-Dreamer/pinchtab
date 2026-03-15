@@ -45,6 +45,10 @@ type Bridge struct {
 	initMu      sync.Mutex
 	initialized bool
 
+	// True when connected to an externally managed Chrome via CDP URL.
+	// Cleanup skips process killing since we didn't launch the browser.
+	externalCDP bool
+
 	// Temp profile cleanup: directories created as fallback when profile lock fails.
 	// These are removed on Cleanup() to prevent Chrome process/disk leaks.
 	tempProfileDir string
@@ -121,6 +125,12 @@ func (b *Bridge) EnsureChrome(cfg *config.RuntimeConfig) error {
 		return nil // Already has browser context
 	}
 
+	// External CDP connection: skip Chrome launch entirely and connect to
+	// an already-running browser via its WebSocket debugger URL.
+	if cfg.CdpURL != "" {
+		return b.attachToExternalCDP(cfg)
+	}
+
 	slog.Debug("ensure chrome called", "headless", cfg.Headless, "profile", cfg.ProfileDir)
 
 	// Initialize Chrome if not already done
@@ -177,10 +187,58 @@ func (b *Bridge) EnsureChrome(cfg *config.RuntimeConfig) error {
 	return nil
 }
 
+// attachToExternalCDP connects the bridge to an externally managed Chrome
+// instance via its CDP WebSocket URL. No Chrome process is launched; stealth
+// injection and profile locking are skipped.
+func (b *Bridge) attachToExternalCDP(cfg *config.RuntimeConfig) error {
+	slog.Info("attaching to external chrome via CDP", "cdpUrl", cfg.CdpURL)
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	allocCtx, allocCancel := chromedp.NewRemoteAllocator(parentCtx, cfg.CdpURL)
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+
+	// Verify the connection is alive
+	if err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return nil
+	})); err != nil {
+		browserCancel()
+		allocCancel()
+		parentCancel()
+		return fmt.Errorf("failed to connect to external chrome at %s: %w", cfg.CdpURL, err)
+	}
+
+	b.AllocCtx = allocCtx
+	b.AllocCancel = func() {
+		allocCancel()
+		parentCancel()
+	}
+	b.BrowserCtx = browserCtx
+	b.BrowserCancel = browserCancel
+	b.initialized = true
+	b.externalCDP = true
+
+	if b.Config != nil && b.TabManager == nil {
+		if b.IdMgr == nil {
+			b.IdMgr = idutil.NewManager()
+		}
+		b.TabManager = NewTabManager(browserCtx, b.Config, b.IdMgr, b.tabSetup)
+	}
+
+	if b.Actions == nil {
+		b.InitActionRegistry()
+	}
+
+	b.MonitorCrashes(nil)
+
+	slog.Info("attached to external chrome successfully", "cdpUrl", cfg.CdpURL)
+	return nil
+}
+
 // Cleanup releases browser resources and removes temporary profile directories.
 // Must be called on shutdown to prevent Chrome process and disk leaks.
 func (b *Bridge) Cleanup() {
-	// Cancel chromedp contexts (kills main Chrome process)
+	// Cancel chromedp contexts. For locally launched Chrome this kills the
+	// process; for external CDP connections it just closes the WS.
 	if b.BrowserCancel != nil {
 		b.BrowserCancel()
 		slog.Debug("chrome browser context cancelled")
@@ -188,6 +246,12 @@ func (b *Bridge) Cleanup() {
 	if b.AllocCancel != nil {
 		b.AllocCancel()
 		slog.Debug("chrome allocator context cancelled")
+	}
+
+	// Skip process cleanup for external CDP — we don't own the browser.
+	if b.externalCDP {
+		slog.Info("cleanup: external CDP connection closed (browser process left running)")
+		return
 	}
 
 	// Chrome spawns helpers (GPU, renderer) in their own process groups.
