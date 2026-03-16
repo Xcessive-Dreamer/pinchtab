@@ -255,11 +255,37 @@ func TestApplyFileConfigToRuntimeResetsSecurityFlagsToSafeDefaults(t *testing.T)
 	}
 }
 
+func TestLoadConfigCdpURL(t *testing.T) {
+	clearConfigEnvVars(t)
+	_ = os.Setenv("PINCHTAB_CONFIG", filepath.Join(t.TempDir(), "nonexistent.json"))
+	_ = os.Setenv("PINCHTAB_CDP_URL", "ws://127.0.0.1:9222/devtools/browser/abc123")
+	defer func() {
+		_ = os.Unsetenv("PINCHTAB_CONFIG")
+		_ = os.Unsetenv("PINCHTAB_CDP_URL")
+	}()
+
+	cfg := Load()
+	if cfg.CdpURL != "ws://127.0.0.1:9222/devtools/browser/abc123" {
+		t.Errorf("CdpURL = %v, want ws://127.0.0.1:9222/devtools/browser/abc123", cfg.CdpURL)
+	}
+}
+
+func TestLoadConfigCdpURL_DefaultEmpty(t *testing.T) {
+	clearConfigEnvVars(t)
+	_ = os.Setenv("PINCHTAB_CONFIG", filepath.Join(t.TempDir(), "nonexistent.json"))
+	defer func() { _ = os.Unsetenv("PINCHTAB_CONFIG") }()
+
+	cfg := Load()
+	if cfg.CdpURL != "" {
+		t.Errorf("default CdpURL = %v, want empty string", cfg.CdpURL)
+	}
+}
+
 // clearConfigEnvVars unsets all config-related env vars for clean tests.
 func clearConfigEnvVars(t *testing.T) {
 	t.Helper()
 	envVars := []string{
-		"PINCHTAB_PORT", "PINCHTAB_BIND", "PINCHTAB_TOKEN", "PINCHTAB_CONFIG", "PINCHTAB_ENGINE",
+		"PINCHTAB_PORT", "PINCHTAB_BIND", "PINCHTAB_TOKEN", "PINCHTAB_CONFIG", "PINCHTAB_ENGINE", "PINCHTAB_CDP_URL",
 	}
 	for _, v := range envVars {
 		_ = os.Unsetenv(v)

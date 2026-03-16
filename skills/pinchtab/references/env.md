@@ -14,6 +14,7 @@ For agent workflows, most runtime behavior should be configured through `config.
 | `PINCHTAB_BIND` | Override bind address for the main server | Operator-level knob; avoid exposing beyond localhost without a token |
 | `PINCHTAB_PORT` | Override the main server port | Main server only, not per-instance targeting |
 | `PINCHTAB_ENGINE` | Select runtime engine when explicitly needed | Defaults to `chrome` |
+| `PINCHTAB_CDP_URL` | Connect to external Chrome | WebSocket URL from `/json/version`. Bridge mode only. |
 
 ## What is intentionally not listed
 

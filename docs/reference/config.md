@@ -114,6 +114,7 @@ The currently supported operational env vars are:
 - `PINCHTAB_BIND`
 - `PINCHTAB_PORT`
 - `PINCHTAB_TOKEN`
+- `PINCHTAB_CDP_URL`
 - `CHROME_BIN`
 
 Everything else should be configured in `config.json`.

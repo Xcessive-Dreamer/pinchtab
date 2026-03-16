@@ -179,6 +179,44 @@ func TestTabContext_EmptyID_UsesCurrentTrackedTab(t *testing.T) {
 	}
 }
 
+func TestAttachToExternalCDP_InvalidURL(t *testing.T) {
+	ctx := context.TODO()
+	b := New(ctx, nil, &config.RuntimeConfig{})
+
+	err := b.attachToExternalCDP(&config.RuntimeConfig{
+		CdpURL: "ws://127.0.0.1:1/invalid",
+	})
+	if err == nil {
+		t.Fatal("attachToExternalCDP should fail with unreachable URL")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to external chrome") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if b.externalCDP {
+		t.Error("externalCDP flag should not be set on failure")
+	}
+	if b.initialized {
+		t.Error("bridge should not be initialized on failure")
+	}
+}
+
+func TestEnsureChrome_RoutesToCDP(t *testing.T) {
+	ctx := context.TODO()
+	cfg := &config.RuntimeConfig{
+		CdpURL: "ws://127.0.0.1:1/invalid",
+	}
+	b := New(ctx, nil, cfg)
+
+	err := b.EnsureChrome(cfg)
+	if err == nil {
+		t.Fatal("EnsureChrome should fail with unreachable CDP URL")
+	}
+	// Verify it went through the CDP path (not the Chrome launch path)
+	if !strings.Contains(err.Error(), "failed to connect to external chrome") {
+		t.Errorf("expected CDP attach error, got: %v", err)
+	}
+}
+
 func TestCloseTab_PreventsLastTabClose(t *testing.T) {
 	// CloseTab should fail when attempting to close the last remaining tab
 	// This prevents Chrome from exiting and crashing the server
