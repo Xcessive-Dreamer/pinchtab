@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/chromedp/cdproto/page"
+	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/pinchtab/pinchtab/internal/config"
 	"github.com/pinchtab/pinchtab/internal/idutil"
@@ -195,20 +196,68 @@ func (b *Bridge) attachToExternalCDP(cfg *config.RuntimeConfig) error {
 
 	parentCtx, parentCancel := context.WithCancel(context.Background())
 	allocCtx, allocCancel := chromedp.NewRemoteAllocator(parentCtx, cfg.CdpURL)
-	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
 
-	// Verify the connection is alive
+	// chromedp v0.14.2 removed WithNewWindow from NewRemoteAllocator's
+	// internal newTarget(), which causes chromedp.Run on a default context
+	// to hang when another CDP client already holds the browser WebSocket.
+	//
+	// Workaround: use chromedp.Targets to list existing page targets (this
+	// doesn't trigger the broken newTarget path), then attach to one with
+	// WithTargetID. If no page targets exist, create one explicitly.
+	//
+	// IMPORTANT: do NOT use timeout contexts as children of the chromedp
+	// context chain. Canceling a child context tears down the CDP session
+	// via chromedp internals.
+	baseCtx, baseCancel := chromedp.NewContext(allocCtx)
+
+	infos, err := chromedp.Targets(baseCtx)
+	if err != nil {
+		baseCancel()
+		allocCancel()
+		parentCancel()
+		return fmt.Errorf("failed to list targets in external chrome at %s: %w", cfg.CdpURL, err)
+	}
+
+	// Find an existing page target to attach to.
+	var tid target.ID
+	for _, info := range infos {
+		if info.Type == "page" {
+			tid = info.TargetID
+			slog.Debug("found existing page target", "targetId", tid, "url", info.URL)
+			break
+		}
+	}
+
+	if tid == "" {
+		// No page targets — create one.
+		if err := chromedp.Run(baseCtx, chromedp.ActionFunc(func(ctx context.Context) error {
+			id, createErr := target.CreateTarget("about:blank").WithNewWindow(true).Do(ctx)
+			tid = id
+			return createErr
+		})); err != nil {
+			baseCancel()
+			allocCancel()
+			parentCancel()
+			return fmt.Errorf("failed to create target in external chrome at %s: %w", cfg.CdpURL, err)
+		}
+	}
+
+	// Attach a context to the selected/created target.
+	browserCtx, browserCancel := chromedp.NewContext(baseCtx, chromedp.WithTargetID(tid))
+
 	if err := chromedp.Run(browserCtx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return nil
 	})); err != nil {
 		browserCancel()
+		baseCancel()
 		allocCancel()
 		parentCancel()
-		return fmt.Errorf("failed to connect to external chrome at %s: %w", cfg.CdpURL, err)
+		return fmt.Errorf("failed to attach to target in external chrome at %s: %w", cfg.CdpURL, err)
 	}
 
 	b.AllocCtx = allocCtx
 	b.AllocCancel = func() {
+		baseCancel()
 		allocCancel()
 		parentCancel()
 	}
@@ -230,7 +279,7 @@ func (b *Bridge) attachToExternalCDP(cfg *config.RuntimeConfig) error {
 
 	b.MonitorCrashes(nil)
 
-	slog.Info("attached to external chrome successfully", "cdpUrl", cfg.CdpURL)
+	slog.Info("attached to external chrome successfully", "cdpUrl", cfg.CdpURL, "targetId", tid)
 	return nil
 }
 
